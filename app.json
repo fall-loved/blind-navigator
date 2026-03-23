@@ -1,4 +1,19 @@
 {
   "name": "blind",
-  "displayName": "blind"
+  "displayName": "blind",
+  "plugins": [
+    [
+      "expo-location",
+      {
+        "locationAlwaysAndWhenInUsePermission": "Разрешите доступ к геолокации для поиска входа в здание."
+      }
+    ],
+    [
+      "expo-speech-recognition",
+      {
+        "microphonePermission": "Разрешите доступ к микрофону для управления навигатором голосовыми командами.",
+        "speechRecognitionPermission": "Разрешите распознавание речи для обработки команд."
+      }
+    ]
+  ]
 }
