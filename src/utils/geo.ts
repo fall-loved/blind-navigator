@@ -7,3 +7,14 @@ export function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: numb
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c * 1000;
 }
+
+export function getTurnInstruction(currentHeading: number, targetBearing: number): string {
+    let angle = (targetBearing - currentHeading + 360) % 360;
+
+    if (angle < 45 || angle > 315) return "Идите прямо";
+    if (angle >= 45 && angle <= 135) return "Поверните направо";
+    if (angle > 135 && angle < 225) return "Развернитесь на 180 градусов";
+    if (angle >= 225 && angle <= 315) return "Поверните налево";
+
+    return "Идите прямо";
+}

@@ -1,19 +1,33 @@
 {
-  "name": "blind",
-  "displayName": "blind",
-  "plugins": [
-    [
-      "expo-location",
-      {
-        "locationAlwaysAndWhenInUsePermission": "Разрешите доступ к геолокации для поиска входа в здание."
-      }
+  "expo": {
+    "name": "blind",
+    "slug": "blind",
+    "version": "1.0.0",
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Разрешите доступ к геолокации для поиска входа в здание."
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Разрешите доступ к микрофону для управления навигатором голосовыми командами.",
+          "speechRecognitionPermission": "Разрешите распознавание речи для обработки команд."
+        }
+      ]
     ],
-    [
-      "expo-speech-recognition",
-      {
-        "microphonePermission": "Разрешите доступ к микрофону для управления навигатором голосовыми командами.",
-        "speechRecognitionPermission": "Разрешите распознавание речи для обработки команд."
+    "android": {
+      "package": "com.yourname.blind",
+      "permissions": [
+        "android.permission.ACTIVITY_RECOGNITION"
+      ]
+    },
+    "extra": {
+      "eas": {
+        "projectId": "f425e99b-d0fa-4c3e-9964-01bd29822d29"
       }
-    ]
-  ]
+    }
+  }
 }

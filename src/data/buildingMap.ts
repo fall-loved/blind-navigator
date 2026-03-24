@@ -1,146 +1,65 @@
 import { BuildingMap } from '@/types.ts';
 
-// ==========================================
-// 1. БАЗОВЫЕ УЗЛЫ (Вход, Фойе, Лестницы)
-// ==========================================
-const baseMap: BuildingMap = {
-    'street': { id: 'street', name: 'Улица', floor: 0, description: 'Улица', edges: [] },
-    'entrance': {
-        id: 'entrance', name: 'Главный вход', floor: 1,
-        gps: { lat: 55.1764, lng: 30.2241 },
-        description: 'Вы у входа.',
-        edges: [{ to: 'lobby_1', instruction: 'Пройдите прямо в фойе к лестнице.' }]
-    },
-    'lobby_1': {
-        id: 'lobby_1', name: 'Фойе 1 этажа', floor: 1,
-        description: 'Вы в главном фойе 1 этажа.',
+export const defaultBuildingMap: BuildingMap = {
+    'fire_door': {
+        id: 'fire_door', name: 'Противопожарная дверь', floor: 2,
+        aliases: ['дверь', 'противопожарная', 'выход на лестницу', 'лестница'],
+        description: 'Вы у противопожарной двери около лестницы ЛК2.',
         edges: [
-            { to: 'entrance', instruction: 'Идите на выход из здания.' },
-            { to: 'stairs_1', instruction: 'Подойдите к центральной лестнице.' }
+            // Коридор теперь 90 (Восток)
+            { to: 'corridor_start', instruction: 'Пройдите через дверь в коридор.', distance: 1.3, bearing: 90, side: 'прямо' }
         ]
     },
-    'stairs_1': {
-        id: 'stairs_1', name: 'Лестница 1 этаж', floor: 1,
-        description: 'Вы у лестницы 1 этажа.',
+    'corridor_start': {
+        id: 'corridor_start', name: 'Начало коридора (у кухни)', floor: 2,
+        aliases: ['начало коридора', 'коридор у кухни'],
+        description: 'Вы в начале коридора.',
         edges: [
-            { to: 'lobby_1', instruction: 'Вернитесь в фойе.' },
-            { to: 'stairs_2', instruction: 'Поднимитесь на 2 этаж.' }
+            // Возврат к двери: 270 (Запад)
+            { to: 'fire_door', instruction: 'Вернитесь к противопожарной двери.', distance: 1.3, bearing: 270, side: 'прямо' },
+
+            // Вход в комнаты: 180 (Юг). Двери СПРАВА по ходу движения (если идем на 90).
+            { to: 'room_34', instruction: 'Поверните к санузлу.', distance: 1.3, bearing: 180, side: 'справа' },
+            { to: 'room_32', instruction: 'Поверните к кухне.', distance: 1.3, bearing: 180, side: 'справа' },
+
+            // Идем дальше по коридору: 90 (Восток)
+            { to: 'corridor_end', instruction: 'Идите прямо по длинному коридору.', distance: 13.0, bearing: 90, side: 'прямо' }
         ]
     },
-    'stairs_2': {
-        id: 'stairs_2', name: 'Лестница 2 этаж', floor: 2,
-        description: 'Вы на лестничной площадке 2 этажа.',
+    'room_34': {
+        id: 'room_34', name: 'Санузел (34)', floor: 2,
+        aliases: ['34', 'санузел', 'туалет'],
+        description: 'Вы у санузла.',
         edges: [
-            { to: 'stairs_1', instruction: 'Спуститесь на 1 этаж.' },
-            { to: 'stairs_3', instruction: 'Поднимитесь на 3 этаж.' }
+            // Возврат в коридор: 0 (Север)
+            { to: 'corridor_start', instruction: 'Выйдите в коридор.', distance: 1.3, bearing: 0 }
         ]
     },
-    'stairs_3': {
-        id: 'stairs_3', name: 'Лестница 3 этаж', floor: 3,
-        description: 'Вы на лестничной площадке 3 этажа.',
+    'room_32': {
+        id: 'room_32', name: 'Кухня (32)', floor: 2,
+        aliases: ['32', 'кухня'],
+        description: 'Вы у кухни.',
+        edges: [{ to: 'corridor_start', instruction: 'Выйдите в коридор.', distance: 1.3, bearing: 0 }]
+    },
+    'corridor_end': {
+        id: 'corridor_end', name: 'Конец коридора (у 27)', floor: 2,
+        aliases: ['конец коридора', 'дальний коридор'],
+        description: 'Вы в конце коридора левого крыла.',
         edges: [
-            { to: 'stairs_2', instruction: 'Спуститесь на 2 этаж.' }
+            // Возврат по длинному коридору: 270 (Запад)
+            { to: 'corridor_start', instruction: 'Идите обратно по длинному коридору.', distance: 13.0, bearing: 270, side: 'прямо' },
+
+            // Дверь 27-й: 0 (Север). Дверь СЛЕВА по ходу движения.
+            { to: 'room_27', instruction: 'Подойдите к двери комнаты 27.', distance: 1.3, bearing: 0, side: 'слева' }
         ]
     },
-};
-
-// ==========================================
-// 2. ГЕНЕРАТОР КРЫЛЬЕВ
-// ==========================================
-type SegmentDef = { segmentId: string; name: string; rooms: number[] };
-
-function buildWing(floor: number, startNodeId: string, segments: SegmentDef[]): BuildingMap {
-    const map: BuildingMap = {};
-    let prevNodeId = startNodeId;
-
-    segments.forEach((seg, index) => {
-        // Создаем сегмент коридора
-        map[seg.segmentId] = {
-            id: seg.segmentId,
-            name: seg.name,
-            floor: floor as 1 | 2 | 3,
-            description: `Вы в коридоре: ${seg.name}.`,
-            edges: []
-        };
-
-        // Привязываем путь назад
-        map[seg.segmentId].edges!.push({ to: prevNodeId, instruction: 'Идите обратно по коридору.' });
-
-        // Привязываем путь вперед (от старта или от прошлого сегмента)
-        if (index === 0) {
-            baseMap[startNodeId].edges!.push({ to: seg.segmentId, instruction: `Пройдите в ${seg.name}.` });
-        } else {
-            map[prevNodeId].edges!.push({ to: seg.segmentId, instruction: 'Идите дальше по коридору в следующую часть.' });
-        }
-
-        // Создаем кабинеты для этого сегмента
-        seg.rooms.forEach(roomNum => {
-            const roomId = `room_${roomNum}`;
-            map[roomId] = {
-                id: roomId,
-                name: `Аудитория ${roomNum}`,
-                floor: floor as 1 | 2 | 3,
-                description: `Вы у аудитории ${roomNum}.`,
-                edges: [{ to: seg.segmentId, instruction: 'Выйдите в коридор.' }]
-            };
-
-            // Добавляем дверь в коридор
-            map[seg.segmentId].edges!.push({ to: roomId, instruction: `Аудитория ${roomNum} находится здесь.` });
-        });
-
-        prevNodeId = seg.segmentId;
-    });
-
-    return map;
-}
-
-// ==========================================
-// 3. РАСПРЕДЕЛЕНИЕ АУДИТОРИЙ ПО СЕГМЕНТАМ
-// ==========================================
-
-// --- 1 ЭТАЖ (101-136) ---
-const floor1LeftWing = buildWing(1, 'lobby_1', [
-    { segmentId: 'c1_l1', name: 'Начало левого крыла (1 этаж)', rooms: [101, 102, 103, 104, 105, 106] },
-    { segmentId: 'c1_l2', name: 'Середина левого крыла (1 этаж)', rooms: [107, 108, 109, 110, 111, 112] },
-    { segmentId: 'c1_l3', name: 'Конец левого крыла (1 этаж)', rooms: [113, 114, 115, 116, 117, 118] }
-]);
-
-const floor1RightWing = buildWing(1, 'lobby_1', [
-    { segmentId: 'c1_r1', name: 'Начало правого крыла (1 этаж)', rooms: [119, 120, 121, 122, 123, 124] },
-    { segmentId: 'c1_r2', name: 'Середина правого крыла (1 этаж)', rooms: [125, 126, 127, 128, 129, 130] },
-    { segmentId: 'c1_r3', name: 'Конец правого крыла (1 этаж)', rooms: [131, 132, 133, 134, 135, 136] }
-]);
-
-// --- 2 ЭТАЖ (200-206) ---
-// Т-образная секция, компактное распределение у лестницы
-const floor2Center = buildWing(2, 'stairs_2', [
-    { segmentId: 'c2_c1', name: 'Центральный коридор (2 этаж)', rooms: [200, 201, 202, 203] },
-    { segmentId: 'c2_c2', name: 'Боковое крыло (2 этаж)', rooms: [204, 205, 206] }
-]);
-
-// --- 3 ЭТАЖ (301-341) ---
-const floor3LeftWing = buildWing(3, 'stairs_3', [
-    { segmentId: 'c3_l1', name: 'Начало левого крыла (3 этаж)', rooms: [301, 302, 303, 304, 305] },
-    { segmentId: 'c3_l2', name: 'Середина левого крыла (3 этаж)', rooms: [306, 307, 308, 309, 310] },
-    { segmentId: 'c3_l3', name: 'Дальняя часть левого крыла (3 этаж)', rooms: [311, 312, 313, 314, 315] },
-    { segmentId: 'c3_l4', name: 'Конец левого крыла (3 этаж)', rooms: [316, 317, 318, 319, 320] }
-]);
-
-const floor3RightWing = buildWing(3, 'stairs_3', [
-    { segmentId: 'c3_r1', name: 'Начало правого крыла (3 этаж)', rooms: [321, 322, 323, 324, 325] },
-    { segmentId: 'c3_r2', name: 'Середина правого крыла (3 этаж)', rooms: [326, 327, 328, 329, 330] },
-    { segmentId: 'c3_r3', name: 'Дальняя часть правого крыла (3 этаж)', rooms: [331, 332, 333, 334, 335] },
-    { segmentId: 'c3_r4', name: 'Конец правого крыла (3 этаж)', rooms: [336, 337, 338, 339, 340, 341] }
-]);
-
-// ==========================================
-// 4. ИТОГОВЫЙ ЭКСПОРТ
-// ==========================================
-export const buildingMap: BuildingMap = {
-    ...baseMap,
-    ...floor1LeftWing,
-    ...floor1RightWing,
-    ...floor2Center,
-    ...floor3LeftWing,
-    ...floor3RightWing,
+    'room_27': {
+        id: 'room_27', name: 'Комната 27', floor: 2,
+        aliases: ['27', 'комната 27', 'комната 213'],
+        description: 'Вы у дальней комнаты 27.',
+        edges: [
+            // Из комнаты в коридор: 180 (Юг)
+            { to: 'corridor_end', instruction: 'Выйдите в коридор.', distance: 1.3, bearing: 180 }
+        ]
+    }
 };

@@ -7,6 +7,9 @@ export interface Coordinates {
 export interface Edge {
     to: string;
     instruction: string;
+    distance: number;
+    bearing?: number;
+    side?: 'слева' | 'справа' | 'прямо';
 }
 
 export interface BuildingNode {
@@ -15,6 +18,7 @@ export interface BuildingNode {
     floor: 0 | 1 | 2 | 3;
     description: string;
     edges?: Edge[];
+    aliases?: string[];
     gps?: Coordinates;
 }
 
