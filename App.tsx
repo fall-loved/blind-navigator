@@ -6,6 +6,7 @@ import { parseVoiceCommand, matchNodeOnMap } from '@/utils/intentParser';
 import * as Speech from 'expo-speech';
 import { findShortestPath, RouteStep } from '@/utils/pathfinder';
 import { useCompass } from '@/hooks/useCompass';
+import {buildNavGraph} from "@/utils/mapEngine.ts";
 
 const STEP_LENGTH = 0.65; // Длина шага (м)
 const TOLERANCE_ZONE = 1.5; // Зона "на месте" (м)
@@ -16,7 +17,7 @@ const getAngleDiff = (angle1: number, angle2: number) => {
     return diff > 180 ? 360 - diff : diff;
 };
 
-export function App() {
+export default function App() {
     const {mapData, currentNodeId, checkInAtLocation} = useBuildingMap();
     const currentHeading = useCompass();
 
@@ -32,6 +33,8 @@ export function App() {
     const [isWrongDirection, setIsWrongDirection] = useState(false);
     const [isOvershot, setIsOvershot] = useState(false);
     const [arrivalAnnounced, setArrivalAnnounced] = useState(false);
+
+
 
     const speak = (text: string) => {
         setLastResponse(text);
