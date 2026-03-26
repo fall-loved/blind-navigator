@@ -4,7 +4,7 @@
   "main": "expo/AppEntry.js",
   "private": true,
   "scripts": {
-    "start": "REACT_NATIVE_PACKAGER_HOSTNAME=192.168.0.106 expo start",
+    "start": "REACT_NATIVE_PACKAGER_HOSTNAME=192.168.0.144 expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "lint": "eslint .",
@@ -22,7 +22,8 @@
     "expo-speech-recognition": "^3.1.2",
     "react": "19.2.0",
     "react-native": "0.83.2",
-    "react-native-safe-area-context": "~5.6.2"
+    "react-native-safe-area-context": "~5.6.2",
+    "react-native-svg": "^15.15.4"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
@@ -38,6 +39,7 @@
     "@types/jest": "^29.5.13",
     "@types/react": "^19.2.14",
     "@types/react-test-renderer": "^19.1.0",
+    "babel-preset-expo": "^55.0.12",
     "eslint": "^8.19.0",
     "jest": "^29.6.3",
     "prettier": "2.8.8",

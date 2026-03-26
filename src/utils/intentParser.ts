@@ -1,4 +1,4 @@
-import { BuildingMap } from '../types';
+import {NavNode} from "@/utils/mapEngine.ts";
 
 export type IntentType = 'WHERE_AM_I' | 'CHECK_IN' | 'LIST_DESTINATIONS' | 'NAVIGATE_TO' | 'UNKNOWN';
 
@@ -57,26 +57,17 @@ export const parseVoiceCommand = (rawText: string): ParsedIntent => {
     return { type: 'UNKNOWN' };
 };
 
-// ... функция matchNodeOnMap остается без изменений ...
-export const matchNodeOnMap = (payload: string, mapData: BuildingMap): string | null => {
-    const text = payload.toLowerCase();
-    const numbers = text.match(/\d+/g);
-    if (numbers) {
-        const targetNumber = numbers[0];
-        const foundByNumber = Object.keys(mapData).find(key =>
-            mapData[key].name.includes(targetNumber) ||
-            mapData[key].aliases?.includes(targetNumber)
-        );
-        if (foundByNumber) return foundByNumber;
-    }
-    for (const key of Object.keys(mapData)) {
+export const matchNodeOnMap = (query: string, mapData: Record<string, NavNode>): string | null => {
+    const q = query.toLowerCase().trim();
+
+    // Перебираем все узлы карты и ищем совпадение по имени
+    for (const key in mapData) {
         const node = mapData[key];
-        if (text.includes(node.name.toLowerCase())) return key;
-        if (node.aliases) {
-            for (const alias of node.aliases) {
-                if (text.includes(alias)) return key;
-            }
+        if (node.name.toLowerCase().includes(q)) {
+            return key; // Возвращаем реальный ID (например, 'f2_room_208')
         }
+        // Если у вас были aliases в старом коде, можно добавить проверку и здесь
     }
+
     return null;
 };

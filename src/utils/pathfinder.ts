@@ -1,87 +1,104 @@
-import { BuildingMap, Edge } from '../types';
+import { NavNode } from './mapEngine';
 
 export interface RouteStep {
     toNodeId: string;
     toNodeName: string;
     instruction: string;
     distance: number;
-    bearing?: number;
-    side?: 'слева' | 'справа' | 'прямо'; // <-- СЮДА
+    bearing: number;
+    side?: 'слева' | 'справа' | 'прямо';
 }
 
-export const findShortestPath = (
-    mapData: BuildingMap,
-    startId: string,
-    endId: string
-): RouteStep[] | null => {
-    const distances: Record<string, number> = {};
-    const previous: Record<string, { nodeId: string; edge: Edge } | null> = {};
-    const unvisited = new Set<string>(Object.keys(mapData));
+// Математика: вычисляем расстояние и азимут между двумя (X, Y)
+const calculateEdgeData = (nodeA: NavNode, nodeB: NavNode) => {
+    // Если переход между этажами
+    if (nodeA.floor !== nodeB.floor) {
+        return { distance: 5, bearing: 0, side: 'прямо' as const }; // Примерно 5 метров по лестнице
+    }
 
-    // 1. Инициализация: расстояния до всех узлов равны бесконечности, кроме стартового
-    for (const key of unvisited) {
-        distances[key] = Infinity;
-        previous[key] = null;
+    const dx = nodeB.x - nodeA.x;
+    const dy = nodeB.y - nodeA.y;
+    const distance = Math.hypot(dx, dy);
+
+    // Азимут: 0 это Север (ось Y)
+    let bearing = Math.atan2(dx, dy) * (180 / Math.PI);
+    if (bearing < 0) bearing += 360;
+
+    return {
+        distance: Math.round(distance * 10) / 10,
+        bearing: Math.round(bearing),
+        side: 'прямо' as const
+    };
+};
+
+// Алгоритм Дейкстры для нашей новой карты
+export const findShortestPath = (graph: Record<string, NavNode>, startId: string, endId: string): RouteStep[] | null => {
+    const distances: Record<string, number> = {};
+    const previous: Record<string, string | null> = {};
+    const unvisited = new Set<string>();
+
+    for (const nodeId in graph) {
+        distances[nodeId] = Infinity;
+        previous[nodeId] = null;
+        unvisited.add(nodeId);
     }
     distances[startId] = 0;
 
-    // 2. Основной цикл алгоритма Дейкстры
     while (unvisited.size > 0) {
-        // Ищем непосещенный узел с минимальным известным расстоянием
-        let currentId: string | null = null;
+        let currNode: string | null = null;
         let minDistance = Infinity;
 
         for (const nodeId of unvisited) {
             if (distances[nodeId] < minDistance) {
                 minDistance = distances[nodeId];
-                currentId = nodeId;
+                currNode = nodeId;
             }
         }
 
-        // Если пути больше нет или мы дошли до цели — останавливаем поиск
-        if (currentId === null || currentId === endId) break;
+        if (currNode === null || currNode === endId) break;
+        unvisited.delete(currNode);
 
-        unvisited.delete(currentId);
-        const currentNode = mapData[currentId];
+        const neighbors = graph[currNode].edges || [];
+        for (const neighborId of neighbors) {
+            if (!unvisited.has(neighborId) || !graph[neighborId]) continue;
 
-        // Проверяем всех соседей текущего узла
-        if (currentNode.edges) {
-            for (const edge of currentNode.edges) {
-                if (unvisited.has(edge.to)) {
-                    // Вычисляем новое расстояние через текущий узел
-                    const altDistance = distances[currentId] + edge.distance;
+            const edgeData = calculateEdgeData(graph[currNode], graph[neighborId]);
+            // Штраф за смену этажа, чтобы алгоритм не прыгал по лестницам просто так
+            const floorPenalty = graph[currNode].floor !== graph[neighborId].floor ? 15 : 0;
 
-                    // Если нашли путь короче — запоминаем его
-                    if (altDistance < distances[edge.to]) {
-                        distances[edge.to] = altDistance;
-                        previous[edge.to] = { nodeId: currentId, edge: edge };
-                    }
-                }
+            const alt = distances[currNode] + edgeData.distance + floorPenalty;
+            if (alt < distances[neighborId]) {
+                distances[neighborId] = alt;
+                previous[neighborId] = currNode;
             }
         }
     }
 
-    // 3. Если путь не найден (узлы изолированы)
-    if (distances[endId] === Infinity) return null;
+    if (previous[endId] === null && startId !== endId) return null; // Путь не найден
 
-    // 4. Восстанавливаем маршрут с конца в начало, собирая инструкции
     const path: RouteStep[] = [];
-    let currId = endId;
+    let curr = endId;
 
-    while (currId !== startId) {
-        const prev = previous[currId];
-        if (!prev) return null;
+    while (curr !== startId) {
+        const prev = previous[curr]!;
+        const edgeData = calculateEdgeData(graph[prev], graph[curr]);
+
+        let instruction = `Идите к: ${graph[curr].name}`;
+        if (graph[prev].floor !== graph[curr].floor) {
+            instruction = graph[curr].floor > graph[prev].floor
+                ? `Поднимитесь на ${graph[curr].floor} этаж`
+                : `Спуститесь на ${graph[curr].floor} этаж`;
+        }
 
         path.unshift({
-            toNodeId: currId,
-            toNodeName: mapData[currId].name,
-            instruction: prev.edge.instruction,
-            distance: Math.round(prev.edge.distance),
-            bearing: prev.edge.bearing,
-            side: prev.edge.side
+            toNodeId: curr,
+            toNodeName: graph[curr].name,
+            instruction,
+            distance: edgeData.distance,
+            bearing: edgeData.bearing,
+            side: edgeData.side
         });
-
-        currId = prev.nodeId;
+        curr = prev;
     }
 
     return path;
