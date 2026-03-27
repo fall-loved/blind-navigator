@@ -8,7 +8,6 @@ export const useBuildingMap = () => {
 
     useEffect(() => {
         try {
-            console.log("Вызов генератора карты...");
             const { nodes, walls } = buildNavGraph();
             setMapData(nodes);
             setMapWalls(walls);

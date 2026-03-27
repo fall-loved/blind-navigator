@@ -1,80 +1,92 @@
-import React, { useEffect } from 'react';
-import { Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { useBuildingMap } from '@/hooks/useBuildingMap';
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, SafeAreaView, TextInput } from 'react-native';
+import { useNavigator } from '@/hooks/useNavigator';
 import { useVoiceAssistant } from '@/hooks/useVoiceAssistant';
+import { styles } from '@/styles';
 
-export default function App_old() {
-    const { mapData, currentNodeId, checkInAtLocation } = useBuildingMap();
+export default function App() {
+    const nav = useNavigator();
+    const [inputText, setInputText] = useState('');
 
-    const handleCommand = async (command: string, payload?: string) => {
-        if (command === 'WHERE_AM_I') {
-            if (currentNodeId && mapData) {
-                speak(`Вы находитесь у: ${mapData[currentNodeId].name}`);
-            } else {
-                speak('Я пока не знаю вашу позицию. Скажите, у какой вы аудитории.');
-            }
-        } else if (command === 'CHECK_IN' && payload) {
-            const targetNodeKey = Object.keys(mapData || {}).find(
-                key => mapData![key].name.toLowerCase() === payload.toLowerCase()
-            );
+    const voice = useVoiceAssistant((text) => {
+        nav.handleCommand(text);
+    });
 
-            if (targetNodeKey && mapData) {
-                speak(`Принято. ${mapData[targetNodeKey].name}. Включаю шагомер.`);
-                await checkInAtLocation(payload); // Передаем данные в вашу систему SLAM
-            } else {
-                speak(`Я не нашла локацию "${payload}" на карте здания.`);
-            }
-        }
-    };
-
-    const { isListening, transcript, startListening, speak } = useVoiceAssistant(handleCommand);
-
-    useEffect(() => {
-        if (mapData) {
-            speak('Навигатор запущен. Коснитесь экрана и скажите, где вы находитесь.');
-        }
-    }, [mapData]);
-
-    if (!mapData) return <Text>Загрузка карты...</Text>;
+    if (!nav.mapData) {
+        return (
+            <View style={styles.loadingContainer}>
+                <Text style={styles.loadingText}>Инициализация карты...</Text>
+            </View>
+        );
+    }
 
     return (
-        <SafeAreaProvider>
-            <SafeAreaView style={{ flex: 1 }}>
-                {/* Весь экран — это одна большая кнопка */}
-                <TouchableOpacity
-                    style={[styles.container, isListening ? styles.listening : styles.idle]}
-                    onPress={startListening}
-                    activeOpacity={0.8}
-                >
-                    <Text style={styles.title}>
-                        {isListening ? 'Слушаю вас...' : 'Коснитесь экрана,\nчтобы сказать команду'}
-                    </Text>
+        <SafeAreaView style={styles.container}>
+            {/* ИНФО-ПАНЕЛЬ ДЛЯ ЭКРАННЫХ ДИКТОРОВ */}
+            <View
+                style={styles.statusBox}
+                accessible={true}
+                accessibilityLabel={`Последнее сообщение ассистента: ${nav.lastResponse}`}
+            >
+                <Text style={styles.statusText} numberOfLines={4}>{nav.lastResponse}</Text>
+            </View>
 
-                    <Text style={styles.transcript}>
-                        {transcript}
-                    </Text>
+            {/* ТРАНСКРИПЦИЯ (Чтобы видеть, что понял микрофон) */}
+            <View style={styles.transcriptBox}>
+                <Text style={styles.transcriptText}>
+                    {voice.transcript ? `"${voice.transcript}"` : ''}
+                </Text>
+            </View>
 
-                    <Text style={styles.status}>
-                        Текущая позиция:{'\n'}
-                        {currentNodeId ? mapData[currentNodeId].name : 'Неизвестно'}
-                    </Text>
+            {/* ГЛАВНАЯ КНОПКА МИКРОФОНА */}
+            <TouchableOpacity
+                style={[styles.micButton, voice.isListening && styles.micButtonActive]}
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel={voice.isListening ? "Слушаю вас" : "Нажмите, чтобы сказать команду"}
+                accessibilityHint="Дважды коснитесь, чтобы продиктовать маршрут"
+                onPress={voice.startListening}
+            >
+                <Text style={styles.micButtonText}>{voice.isListening ? '👂' : '🎙️'}</Text>
+                <Text style={styles.micButtonSubText}>{voice.isListening ? 'СЛУШАЮ...' : 'ГОВОРИТЕ'}</Text>
+            </TouchableOpacity>
+
+            {/* ВРЕМЕННОЕ ПОЛЕ ВВОДА ДЛЯ ТЕСТОВ */}
+            <View style={styles.devInputContainer}>
+                <TextInput
+                    style={styles.input}
+                    value={inputText}
+                    onChangeText={setInputText}
+                    onSubmitEditing={() => { nav.handleCommand(inputText); setInputText(''); }}
+                    placeholder="Ручной ввод..."
+                    placeholderTextColor="#666"
+                />
+                <TouchableOpacity style={styles.sendBtn} onPress={() => { nav.handleCommand(inputText); setInputText(''); }}>
+                    <Text style={styles.sendBtnText}>➤</Text>
                 </TouchableOpacity>
-            </SafeAreaView>
-        </SafeAreaProvider>
+            </View>
+
+            {/* ПАНЕЛЬ ПОРТАЛОВ */}
+            {nav.availableFloors.length > 0 && nav.portalNearby && (
+                <View style={styles.portalOverlay}>
+                    <Text style={styles.portalHeader}>ВЫ У ПЕРЕХОДА</Text>
+                    <Text style={styles.portalName}>{nav.portalNearby.name}</Text>
+
+                    <View style={styles.portalBtnContainer}>
+                        {nav.availableFloors.map(f => (
+                            <TouchableOpacity
+                                key={f}
+                                style={styles.portalBtn}
+                                onPress={() => nav.handleFloorTransition(f)}
+                                accessible={true}
+                                accessibilityLabel={`Подтвердить переход на ${f} этаж`}
+                            >
+                                <Text style={styles.portalBtnText}>{f} этаж</Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                </View>
+            )}
+        </SafeAreaView>
     );
 }
-
-const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: 20
-    },
-    idle: { backgroundColor: '#f0f0f0' },
-    listening: { backgroundColor: '#ffecec' }, // Экран слегка краснеет, когда идет запись
-    title: { fontSize: 28, fontWeight: 'bold', textAlign: 'center', marginBottom: 40 },
-    transcript: { fontSize: 20, color: '#555', fontStyle: 'italic', marginBottom: 40, textAlign: 'center' },
-    status: { fontSize: 18, color: '#0066cc', textAlign: 'center' }
-});

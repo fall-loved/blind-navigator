@@ -5,7 +5,7 @@ import { useNavigator } from '@/hooks/useNavigator';
 
 export default function App() {
     const nav = useNavigator();
-    const [inputText, setInputText] = useState(''); // Единственное состояние, которое осталось здесь (чисто для UI)
+    const [inputText, setInputText] = useState('');
 
     if (!nav.mapData) return <View style={styles.center}><Text>Постройка 3D здания...</Text></View>;
 
@@ -119,7 +119,6 @@ export default function App() {
     );
 }
 
-// Стили остались без изменений
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f0f2f5' },
     center: { flex: 1, justifyContent: 'center', alignItems: 'center' },

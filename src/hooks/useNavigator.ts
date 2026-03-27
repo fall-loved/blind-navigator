@@ -8,6 +8,7 @@ import { findShortestPath, RouteStep } from '@/utils/pathfinder';
 
 const STEP_LENGTH = 0.65;
 const TOLERANCE_ZONE = 1.0;
+const BUILDING_NORTH_OFFSET = 0;
 
 const getRelativeDirectionText = (currentHeading: number, targetBearing: number) => {
     let diff = targetBearing - currentHeading;
@@ -17,7 +18,7 @@ const getRelativeDirectionText = (currentHeading: number, targetBearing: number)
     if (Math.abs(diff) <= 20) return 'прямо';
     if (diff > 20 && diff <= 60) return 'немного правее';
     if (diff > 60 && diff <= 120) return 'направо';
-    if (diff > 120 || diff < -120) return 'кругом (развернитесь)';
+    if (diff > 120 || diff < -120) return 'развернитесь';
     if (diff < -20 && diff >= -60) return 'немного левее';
     if (diff < -60 && diff >= -120) return 'налево';
     return 'прямо';
@@ -42,7 +43,7 @@ const getAngleDiff = (angle1: number, angle2: number) => {
 
 export const useNavigator = () => {
     const { mapData, mapWalls, currentNodeId, checkInAtLocation } = useBuildingMap();
-    const currentHeading = useCompass();
+    const rawCompassHeading = useCompass();
 
     const [isSimMode, setIsSimMode] = useState(true);
     const [simHeading, setSimHeading] = useState(0);
@@ -59,6 +60,12 @@ export const useNavigator = () => {
     const [arrivalAnnounced, setArrivalAnnounced] = useState(false);
     const [viewFloor, setViewFloor] = useState(1);
 
+    const currentHeading = useMemo(() => {
+        let heading = rawCompassHeading - BUILDING_NORTH_OFFSET;
+        if (heading < 0) heading += 360;
+        return heading;
+    }, [rawCompassHeading]);
+
     const effectiveHeading = isSimMode ? simHeading : currentHeading;
 
     const speak = useCallback((text: string) => {
@@ -73,6 +80,15 @@ export const useNavigator = () => {
             setViewFloor(mapData[currentNodeId].floor);
         }
     }, [currentNodeId, mapData]);
+
+    useEffect(() => {
+        if (mapData && !currentNodeId) {
+            const entrance = Object.values(mapData).find(node => node.name.toLowerCase().includes('вход'));
+            if (entrance) {
+                checkInAtLocation(entrance.id);
+            }
+        }
+    }, [mapData, currentNodeId, checkInAtLocation]);
 
     const handleStep = useCallback(() => {
         const activeHeading = isSimMode ? simHeading : currentHeading;
@@ -174,36 +190,55 @@ export const useNavigator = () => {
             targetIdForCurrentFloor = bestPortalId;
         }
 
-        if (startId === targetIdForCurrentFloor) {
-            if (startNode.floor !== destNode.floor) {
-                speak(`Вы уже у перехода. Поднимитесь на ${destNode.floor} этаж.`);
-            } else {
-                speak(`Вы уже находитесь в пункте назначения.`);
-            }
-            return;
-        }
-
         const route = findShortestPath(mapData, startId, targetIdForCurrentFloor, wantsElevator);
 
-        if (route && route.length > 0) {
-            setActiveRoute(route);
-            setCurrentStepIndex(0);
-            setIsWrongDirection(false);
-            setArrivalAnnounced(false);
-            if(isSimMode) setSimHeading(route[0].bearing || 0);
+        if (route !== null) {
+            const distFromUser = Math.hypot(currentPos.x - startNode.x, currentPos.y - startNode.y);
 
-            const firstLeg = route[0];
-            const isGenericNode = firstLeg.toNodeName.toLowerCase().includes('точка') || firstLeg.toNodeName.toLowerCase().includes('waypoint');
+            if (distFromUser > 1.0) {
+                let bearing = Math.atan2(startNode.x - currentPos.x, startNode.y - currentPos.y) * (180 / Math.PI);
+                if (bearing < 0) bearing += 360;
 
-            let startInstruction = '';
-            if (isGenericNode) {
-                startInstruction = `Идите прямо ${Math.round(firstLeg.distance)} метров.`;
-            } else {
-                const sideText = route.length === 1 && firstLeg.side && firstLeg.side !== 'прямо' ? `Дверь будет ${firstLeg.side}.` : '';
-                startInstruction = `Идите прямо к ${firstLeg.toNodeName}. ${sideText}`;
+                route.unshift({
+                    toNodeId: startId,
+                    toNodeName: startNode.name,
+                    instruction: `Идите к ${startNode.name}`,
+                    distance: distFromUser,
+                    bearing: Math.round(bearing),
+                    side: 'прямо'
+                });
             }
 
-            speak(`Маршрут построен. ${startInstruction}`);
+
+            if (route.length > 0) {
+                setActiveRoute(route);
+                setCurrentStepIndex(0);
+                setIsWrongDirection(false);
+                setArrivalAnnounced(false);
+
+                if(isSimMode) setSimHeading(route[0].bearing || 0);
+
+                const firstLeg = route[0];
+                const isGenericNode = firstLeg.toNodeName.toLowerCase().includes('точка') || firstLeg.toNodeName.toLowerCase().includes('waypoint');
+
+                let startInstruction = '';
+                if (isGenericNode) {
+                    startInstruction = `Идите прямо ${Math.round(firstLeg.distance)} метров.`;
+                } else {
+                    const sideText = route.length === 1 && firstLeg.side && firstLeg.side !== 'прямо' ? `Дверь будет ${firstLeg.side}.` : '';
+                    startInstruction = `Идите прямо к ${firstLeg.toNodeName}. ${sideText}`;
+                }
+
+                speak(`Маршрут построен. ${startInstruction}`);
+            } else {
+
+                if (startNode.floor !== destNode.floor) {
+                    speak(`Вы уже у перехода. Поднимитесь на ${destNode.floor} этаж.`);
+                    checkInAtLocation(startId);
+                } else {
+                    speak(`Вы уже находитесь в пункте назначения.`);
+                }
+            }
         } else {
             if (!isFallback && startNode.floor !== destNode.floor) {
                 speak(`Путь к ${wantsElevator ? 'лифту' : 'лестнице'} заблокирован. Пробую другой маршрут.`);
@@ -213,88 +248,7 @@ export const useNavigator = () => {
                 setActiveRoute(null);
             }
         }
-    }, [mapData, isSimMode, speak]);
-
-    const handleCommand = useCallback(async (rawText: string) => {
-        if (!rawText.trim() || !mapData) return;
-        const raw = rawText.toLowerCase();
-
-        if (raw.includes('отмен') || raw.includes('стоп') || raw.includes('заверш')) {
-            setActiveRoute(null);
-            setFinalDestId(null);
-            speak('Маршрут отменен.');
-            return;
-        }
-
-        const intent = parseVoiceCommand(rawText);
-
-        if (intent.type === 'WHERE_AM_I') {
-            let bestNode = null;
-            let minDist = Infinity;
-            for (const key in mapData) {
-                const node = mapData[key];
-                // ИГНОРИРУЕМ ПУТЕВЫЕ ТОЧКИ! Ищем только двери, лестницы и реальные ориентиры
-                if (node.floor === viewFloor && !node.name.toLowerCase().includes('точка') && !node.name.toLowerCase().includes('waypoint')) {
-                    const dist = Math.hypot(currentPos.x - node.x, currentPos.y - node.y);
-                    if (dist < minDist) { minDist = dist; bestNode = node; }
-                }
-            }
-            if (bestNode) {
-                if (minDist <= 1.5) speak(`Вы находитесь прямо у: ${bestNode.name}.`);
-                else speak(`Ближайший ориентир: ${bestNode.name}, примерно в ${Math.round(minDist)} метрах.`);
-            } else speak('Я пока не знаю позицию.');
-
-        } else if (intent.type === 'CHECK_IN' && intent.payload) {
-            const isNear = raw.match(/\b(у|возле|около|рядом)\b/) !== null;
-
-            const cleanPayload = intent.payload.replace(/\b(у|возле|около|рядом с|рядом)\b/gi, '').trim();
-            const destId = matchNodeOnMap(cleanPayload || intent.payload, mapData);
-
-            if (destId) {
-                let teleportId = destId;
-                const targetNode = mapData[destId];
-
-                if (isNear) {
-                    const connectedEdges = targetNode.edges || [];
-                    for (const edgeId of connectedEdges) {
-                        if (mapData[edgeId] && mapData[edgeId].type !== 'room') {
-                            teleportId = edgeId;
-                            break;
-                        }
-                    }
-                }
-
-                setActiveRoute(null);
-                setFinalDestId(null);
-                speak(`Позиция обновлена: ${isNear ? 'возле ' : 'в '}${targetNode.name}.`);
-                await checkInAtLocation(teleportId);
-                setCurrentPos({ x: mapData[teleportId].x, y: mapData[teleportId].y }); // Обновляем радар
-            } else speak(`Не поняла локацию "${intent.payload}".`);
-
-        } else if (intent.type === 'NAVIGATE_TO' && intent.payload) {
-            let bestStartId = currentNodeId;
-            let minDist = Infinity;
-            for (const key in mapData) {
-                if (mapData[key].floor === viewFloor) {
-                    const dist = Math.hypot(currentPos.x - mapData[key].x, currentPos.y - mapData[key].y);
-                    if (dist < minDist) { minDist = dist; bestStartId = key; }
-                }
-            }
-
-            if (!bestStartId) {
-                speak('Где вы находитесь? Нажмите "Старт" или скажите ориентир.');
-                return;
-            }
-
-            const wantsElevator = raw.includes('лифт');
-            const cleanPayload = intent.payload.replace(/\b(на|через)\b\s*лифт[а-я]*/gi, '').trim();
-
-            const destId = matchNodeOnMap(cleanPayload, mapData);
-            if (destId) {
-                startNavigation(bestStartId, destId, wantsElevator);
-            } else speak(`Не нашла пункт назначения.`);
-        }
-    }, [mapData, currentNodeId, currentPos, viewFloor, startNavigation, checkInAtLocation, speak]);
+    }, [mapData, currentPos, isSimMode, speak, checkInAtLocation]);
 
     const currentFloor = viewFloor;
 
@@ -372,6 +326,101 @@ export const useNavigator = () => {
             speak(`Ошибка связи этажей.`);
         }
     }, [portalNearby, mapData, finalDestId, useElevator, checkInAtLocation, speak, setViewFloor, startNavigation]);
+
+
+    const handleCommand = useCallback(async (rawText: string) => {
+        if (!rawText.trim() || !mapData) return;
+        const raw = rawText.toLowerCase();
+
+        if (raw.includes('отмен') || raw.includes('стоп') || raw.includes('заверш')) {
+            setActiveRoute(null);
+            setFinalDestId(null);
+            speak('Маршрут отменен.');
+            return;
+        }
+
+        const intent = parseVoiceCommand(rawText);
+
+        if (intent.type === 'CONFIRM_FLOOR' && intent.payload) {
+            const floorStr = intent.payload.toLowerCase();
+            let targetFloor = parseInt(floorStr);
+
+            if (isNaN(targetFloor)) {
+                if (floorStr.includes('перв')) targetFloor = 1;
+                else if (floorStr.includes('втор')) targetFloor = 2;
+                else if (floorStr.includes('трет')) targetFloor = 3;
+            }
+
+            if (targetFloor) {
+                if (availableFloors.includes(targetFloor)) {
+                    handleFloorTransition(targetFloor);
+                } else if (portalNearby) {
+                    speak(`С этого места нельзя попасть на ${targetFloor} этаж.`);
+                } else {
+                    speak(`Вы сейчас не у перехода между этажами.`);
+                }
+            }
+            return;
+        } else if (intent.type === 'WHERE_AM_I') {
+            let bestNode = null;
+            let minDist = Infinity;
+            for (const key in mapData) {
+                const node = mapData[key];
+                if (node.floor === viewFloor && !node.name.toLowerCase().includes('точка') && !node.name.toLowerCase().includes('waypoint')) {
+                    const dist = Math.hypot(currentPos.x - node.x, currentPos.y - node.y);
+                    if (dist < minDist) { minDist = dist; bestNode = node; }
+                }
+            }
+            if (bestNode) {
+                if (minDist <= 1.5) speak(`Вы находитесь прямо у: ${bestNode.name}.`);
+                else speak(`Ближайший ориентир: ${bestNode.name}, примерно в ${Math.round(minDist)} метрах.`);
+            } else speak('Я пока не знаю позицию.');
+
+        } else if (intent.type === 'CHECK_IN' && intent.payload) {
+            const destId = matchNodeOnMap(intent.payload, mapData);
+
+            if (destId) {
+                let teleportId = destId;
+                const targetNode = mapData[destId];
+
+                if (intent.isNear) {
+                    const connectedEdges = targetNode.edges || [];
+                    if (connectedEdges.length > 0) {
+                        teleportId = connectedEdges[0];
+                    }
+                }
+
+                setActiveRoute(null);
+                setFinalDestId(null);
+                speak(`Позиция обновлена: ${intent.isNear ? 'возле ' : 'в '}${targetNode.name}.`);
+                await checkInAtLocation(teleportId);
+                setCurrentPos({ x: mapData[teleportId].x, y: mapData[teleportId].y });
+            } else speak(`Не поняла локацию "${intent.payload}".`);
+
+        } else if (intent.type === 'NAVIGATE_TO' && intent.payload) {
+            let bestStartId = currentNodeId;
+            let minDist = Infinity;
+            for (const key in mapData) {
+                if (mapData[key].floor === viewFloor) {
+                    const dist = Math.hypot(currentPos.x - mapData[key].x, currentPos.y - mapData[key].y);
+                    if (dist < minDist) { minDist = dist; bestStartId = key; }
+                }
+            }
+
+            if (!bestStartId) {
+                speak('Где вы находитесь? Нажмите "Старт" или скажите ориентир.');
+                return;
+            }
+
+            const wantsElevator = raw.includes('лифт');
+            const cleanPayload = intent.payload.replace(/\b(на|через)\b\s*лифт[а-я]*/gi, '').trim();
+
+            const destId = matchNodeOnMap(cleanPayload, mapData);
+            if (destId) {
+                startNavigation(bestStartId, destId, wantsElevator);
+            } else speak(`Не нашла пункт назначения.`);
+        }
+    }, [mapData, speak, availableFloors, portalNearby, handleFloorTransition, viewFloor, currentPos.x, currentPos.y, checkInAtLocation, currentNodeId, startNavigation]);
 
     const currentLeg = activeRoute ? activeRoute[currentStepIndex] : null;
     let distanceToTarget = 0;
