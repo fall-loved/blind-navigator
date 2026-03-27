@@ -9,30 +9,22 @@ export interface RouteStep {
     side?: 'слева' | 'справа' | 'прямо';
 }
 
-// Математика: вычисляем расстояние и азимут между двумя (X, Y)
-const calculateEdgeData = (nodeA: NavNode, nodeB: NavNode) => {
-    // Если переход между этажами
-    if (nodeA.floor !== nodeB.floor) {
-        return { distance: 5, bearing: 0, side: 'прямо' as const }; // Примерно 5 метров по лестнице
-    }
-
+const calculateEdgeData = (nodeA: NavNode, nodeB: NavNode): { distance: number; bearing: number; side: 'слева' | 'справа' | 'прямо' } => {
+    if (nodeA.floor !== nodeB.floor) return { distance: 5, bearing: 0, side: 'прямо' };
     const dx = nodeB.x - nodeA.x;
     const dy = nodeB.y - nodeA.y;
     const distance = Math.hypot(dx, dy);
-
-    // Азимут: 0 это Север (ось Y)
     let bearing = Math.atan2(dx, dy) * (180 / Math.PI);
     if (bearing < 0) bearing += 360;
 
     return {
         distance: Math.round(distance * 10) / 10,
         bearing: Math.round(bearing),
-        side: 'прямо' as const
+        side: 'прямо'
     };
 };
 
-// Алгоритм Дейкстры для нашей новой карты
-export const findShortestPath = (graph: Record<string, NavNode>, startId: string, endId: string): RouteStep[] | null => {
+export const findShortestPath = (graph: Record<string, NavNode>, startId: string, endId: string, preferElevator: boolean = false): RouteStep[] | null => {
     const distances: Record<string, number> = {};
     const previous: Record<string, string | null> = {};
     const unvisited = new Set<string>();
@@ -63,10 +55,20 @@ export const findShortestPath = (graph: Record<string, NavNode>, startId: string
             if (!unvisited.has(neighborId) || !graph[neighborId]) continue;
 
             const edgeData = calculateEdgeData(graph[currNode], graph[neighborId]);
-            // Штраф за смену этажа, чтобы алгоритм не прыгал по лестницам просто так
-            const floorPenalty = graph[currNode].floor !== graph[neighborId].floor ? 15 : 0;
+            let floorPenalty = 0;
+            if (graph[currNode].floor !== graph[neighborId].floor) {
+                floorPenalty += 15;
+                const isElevator = graph[currNode].name.toLowerCase().includes('лифт');
+                if (!preferElevator && isElevator) floorPenalty += 10000;
+                if (preferElevator && !isElevator) floorPenalty += 10000;
+            }
 
-            const alt = distances[currNode] + edgeData.distance + floorPenalty;
+            let roomPenalty = 0;
+            if (graph[neighborId].type === 'room' && neighborId !== endId && neighborId !== startId) {
+                roomPenalty += 50;
+            }
+
+            const alt = distances[currNode] + edgeData.distance + floorPenalty + roomPenalty;
             if (alt < distances[neighborId]) {
                 distances[neighborId] = alt;
                 previous[neighborId] = currNode;
@@ -74,7 +76,7 @@ export const findShortestPath = (graph: Record<string, NavNode>, startId: string
         }
     }
 
-    if (previous[endId] === null && startId !== endId) return null; // Путь не найден
+    if (previous[endId] === null && startId !== endId) return null;
 
     const path: RouteStep[] = [];
     let curr = endId;
@@ -82,12 +84,26 @@ export const findShortestPath = (graph: Record<string, NavNode>, startId: string
     while (curr !== startId) {
         const prev = previous[curr]!;
         const edgeData = calculateEdgeData(graph[prev], graph[curr]);
-
         let instruction = `Идите к: ${graph[curr].name}`;
+
+        // МАГИЯ: Определяем сторону двери по векторам!
+        if (curr === endId && graph[curr].type === 'room') {
+            const prevOfPrev = previous[prev];
+            if (prevOfPrev) {
+                const corridorBearing = calculateEdgeData(graph[prevOfPrev], graph[prev]).bearing;
+                let diff = edgeData.bearing - corridorBearing;
+                while (diff <= -180) diff += 360;
+                while (diff > 180) diff -= 360;
+
+                if (diff > 20 && diff < 160) edgeData.side = 'справа';
+                else if (diff < -20 && diff > -160) edgeData.side = 'слева';
+                else edgeData.side = 'прямо';
+            }
+        }
+
         if (graph[prev].floor !== graph[curr].floor) {
-            instruction = graph[curr].floor > graph[prev].floor
-                ? `Поднимитесь на ${graph[curr].floor} этаж`
-                : `Спуститесь на ${graph[curr].floor} этаж`;
+            const action = graph[curr].name.toLowerCase().includes('лифт') ? 'Поезжайте' : (graph[curr].floor > graph[prev].floor ? 'Поднимитесь' : 'Спуститесь');
+            instruction = `${action} на ${graph[curr].floor} этаж`;
         }
 
         path.unshift({

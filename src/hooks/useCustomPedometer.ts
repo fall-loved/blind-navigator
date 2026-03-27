@@ -2,8 +2,6 @@ import { useEffect, useRef } from 'react';
 import { Accelerometer } from 'expo-sensors';
 
 export const useCustomPedometer = (isActive: boolean, onStep: () => void) => {
-    // Используем ref, чтобы всегда вызывать самую свежую версию функции onStep,
-    // не пересоздавая подписку на датчик каждую миллисекунду.
     const savedCallback = useRef(onStep);
     const lastStepTime = useRef(0);
 
@@ -21,7 +19,7 @@ export const useCustomPedometer = (isActive: boolean, onStep: () => void) => {
             const now = Date.now();
 
             if (magnitude > 1.15 && now - lastStepTime.current > 400) {
-                savedCallback.current(); // Вызываем обработчик шага!
+                savedCallback.current();
                 lastStepTime.current = now;
             }
         });
