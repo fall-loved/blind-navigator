@@ -5,12 +5,6 @@
     "version": "1.0.0",
     "plugins": [
       [
-        "expo-location",
-        {
-          "locationAlwaysAndWhenInUsePermission": "Разрешите доступ к геолокации для поиска входа в здание."
-        }
-      ],
-      [
         "expo-speech-recognition",
         {
           "microphonePermission": "Разрешите доступ к микрофону для управления навигатором голосовыми командами.",
@@ -19,9 +13,10 @@
       ]
     ],
     "android": {
-      "package": "com.yourname.blind",
+      "package": "com.yourname.blind.proto",
       "permissions": [
-        "android.permission.ACTIVITY_RECOGNITION"
+        "ACTIVITY_RECOGNITION",
+        "RECORD_AUDIO"
       ]
     },
     "extra": {

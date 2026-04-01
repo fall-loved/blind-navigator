@@ -86,7 +86,6 @@ export const findShortestPath = (graph: Record<string, NavNode>, startId: string
         const edgeData = calculateEdgeData(graph[prev], graph[curr]);
         let instruction = `Идите к: ${graph[curr].name}`;
 
-        // МАГИЯ: Определяем сторону двери по векторам!
         if (curr === endId && graph[curr].type === 'room') {
             const prevOfPrev = previous[prev];
             if (prevOfPrev) {
