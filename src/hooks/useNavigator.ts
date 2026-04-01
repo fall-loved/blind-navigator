@@ -43,7 +43,7 @@ const getAngleDiff = (angle1: number, angle2: number) => {
 
 export const useNavigator = () => {
     const { mapData, mapWalls, currentNodeId, checkInAtLocation } = useBuildingMap();
-    const rawCompassHeading = useCompass();
+    const { heading: rawCompassHeading, pitch, roll } = useCompass();
 
     const [isSimMode, setIsSimMode] = useState(true);
     const [simHeading, setSimHeading] = useState(0);
@@ -433,6 +433,6 @@ export const useNavigator = () => {
         activeRoute, currentStepIndex, currentLeg, distanceToTarget, isWrongDirection,
         portalNearby, availableFloors, handleFloorTransition,
         lastResponse, handleCommand, speak, checkInAtLocation, setActiveRoute, setFinalDestId,
-        isSimMode, setIsSimMode, setSimHeading, handleStep
+        isSimMode, setIsSimMode, setSimHeading, handleStep, pitch, roll
     };
 };

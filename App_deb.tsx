@@ -76,7 +76,23 @@ export default function App() {
             <ScrollView style={styles.content}>
                 {/* ТЕЛЕМЕТРИЯ И ВЕДЕНИЕ */}
                 <View style={{ backgroundColor: '#fff', padding: 10, borderRadius: 8, marginBottom: 15 }}>
-                    <Text style={{fontSize: 12, color: '#666'}}>📍 Этаж {nav.currentFloor} | X: {nav.currentPos.x.toFixed(1)} Y: {nav.currentPos.y.toFixed(1)} | Азимут: {nav.effectiveHeading}°</Text>
+                    {/* ОБНОВЛЕННАЯ СТРОКА ТЕЛЕМЕТРИИ С PITCH И ROLL */}
+                    <Text style={{fontSize: 12, color: '#666', marginBottom: 4}}>
+                        📍 Этаж {nav.currentFloor} | X: {nav.currentPos.x.toFixed(1)} Y: {nav.currentPos.y.toFixed(1)}
+                    </Text>
+                    <Text style={{fontSize: 12, color: '#1976d2', fontWeight: 'bold', marginBottom: 8}}>
+                        🧭 Азимут: {nav.effectiveHeading}° | Pitch: {nav.pitch}° | Roll: {nav.roll}°
+                    </Text>
+
+                    {/* АЛЕРТ КРИТИЧЕСКОГО НАКЛОНА */}
+                    {Math.abs(nav.pitch) > 70 && (
+                        <View style={{ backgroundColor: '#ff9800', padding: 8, borderRadius: 6, marginBottom: 10 }}>
+                            <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold', textAlign: 'center' }}>
+                                ⚠️ Телефон сильно наклонен! Точность компаса может быть снижена.
+                            </Text>
+                        </View>
+                    )}
+
                     {nav.activeRoute && nav.currentLeg && (
                         <View style={[styles.routeBox, nav.isWrongDirection && styles.routeError]}>
                             <Text style={styles.routeHeader}>ВЕДЕНИЕ ({nav.currentStepIndex + 1}/{nav.activeRoute.length})</Text>

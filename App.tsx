@@ -81,7 +81,6 @@ export default function App() {
                 accessibilityHint="Дважды коснитесь, чтобы продиктовать маршрут"
                 onPress={voice.startListening}
             >
-                <Text style={styles.micButtonText}>{voice.isListening ? '👂' : '🎙️'}</Text>
                 <Text style={styles.micButtonSubText}>{voice.isListening ? 'СЛУШАЮ...' : 'ГОВОРИТЕ'}</Text>
             </TouchableOpacity>
         </SafeAreaView>
