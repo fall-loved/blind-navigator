@@ -353,7 +353,7 @@ export const useNavigator = () => {
                 setActiveRoute(null);
             }
         }
-    }, [mapData, currentPos, isSimMode, speak, checkInAtLocation]);
+    }, [mapData, currentPos, speak, checkInAtLocation]);
 
     const portalNearby = useMemo(() => {
         if (!mapData) return null;
