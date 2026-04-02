@@ -335,7 +335,7 @@
             const p2 = metersToPx(w.x2, w.y2);
             ctx.beginPath();
             ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
-            ctx.strokeStyle = (selectedItem?.type === 'wall' && selectedItem.index === index) ? '#00BCD4' : '#333';
+            ctx.strokeStyle = (selectedItem?.type === 'wall' && selectedItem.index === index) ? '#00BCD4' : '#ed0505';
             ctx.lineWidth = 4; ctx.stroke();
         });
 
