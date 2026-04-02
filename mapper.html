@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Картограф 3.0 - Файловая система</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; margin: 0; padding: 0; background: #eef2f5; height: 100vh; overflow: hidden; }
+        #toolbar { width: 320px; background: #fff; padding: 20px; box-shadow: 2px 0 5px rgba(0,0,0,0.1); overflow-y: auto; z-index: 10; }
+        #canvas-wrapper { flex: 1; overflow: auto; position: relative; display: flex; align-items: flex-start; justify-content: flex-start; padding: 20px; background: #ddd; }
+        canvas { background: #fff; box-shadow: 0 4px 8px rgba(0,0,0,0.2); cursor: crosshair; }
+
+        .panel { border: 1px solid #ccc; padding: 10px; border-radius: 6px; margin-bottom: 15px; background: #fafafa; }
+        h3 { margin-top: 0; font-size: 16px; color: #333; }
+        label { display: block; margin-bottom: 8px; font-size: 14px; cursor: pointer; }
+        input[type="number"], input[type="file"] { width: 100%; padding: 6px; margin-bottom: 10px; box-sizing: border-box; }
+        button { width: 100%; padding: 10px; margin-bottom: 10px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+
+        .btn-export { background: #4CAF50; color: white; margin-top: 10px; }
+        .btn-export:hover { background: #45a049; }
+        .btn-danger { background: #f44336; color: white; }
+        .btn-danger:hover { background: #d32f2f; }
+        .info { font-size: 12px; color: #666; font-style: italic; }
+        hr { border: 0; height: 1px; background: #ddd; margin: 15px 0; }
+    </style>
+</head>
+<body>
+
+<div id="toolbar">
+    <h2>Картограф 3.0</h2>
+
+    <div class="panel">
+        <h3>1. Загрузка подложки</h3>
+        <input type="file" id="imageLoader" accept="image/*"/>
+        <label>Масштаб (метров в 1 пикс):</label>
+        <input type="number" id="scaleInput" value="0.02" step="0.005"/>
+    </div>
+
+    <div class="panel">
+        <h3>2. Инструменты</h3>
+        <label><input type="radio" name="mode" value="ORIGIN" checked> 🎯 Задать центр (0,0)</label>
+        <label><input type="radio" name="mode" value="ADD_NODE"> 📍 Ставить точки (Узлы)</label>
+        <label><input type="radio" name="mode" value="ADD_WALL"> 🧱 Рисовать стену (Shift = 90°)</label>
+        <label><input type="radio" name="mode" value="SELECT"> 🖐 Выделение / Перемещение</label>
+    </div>
+
+    <div class="panel" id="editPanel" style="display: none; border-color: #2196F3; background: #e3f2fd;">
+        <h3>Выделенный объект</h3>
+        <p id="selectedInfo" style="margin: 0 0 10px 0; font-weight: bold; color: #1565c0;">Ничего не выделено</p>
+        <button class="btn-danger" id="btnDelete">Удалить объект (Del)</button>
+    </div>
+
+    <div class="panel">
+        <h3>💾 Файлы карты</h3>
+        <button class="btn-export" onclick="downloadJSON()">⬇️ Скачать карту (.json)</button>
+        <hr>
+        <label style="font-weight: bold;">⬆️ Продолжить работу (Импорт):</label>
+        <input type="file" id="jsonLoader" accept=".json"/>
+        <p class="info">При импорте автоматически восстановится ваш масштаб и точка (0,0).</p>
+    </div>
+</div>
+
+<div id="canvas-wrapper">
+    <canvas id="mapCanvas"></canvas>
+</div>
+
+<script>
+    const canvas = document.getElementById('mapCanvas');
+    const ctx = canvas.getContext('2d');
+
+    let img = new Image();
+    let nodes = {};
+    let walls = [];
+    let nodeIdCounter = 1;
+
+    let originPx = { x: 50, y: 50 };
+    let scale = 0.02;
+
+    let currentMode = 'ORIGIN';
+    let selectedItem = null;
+    let dragging = false;
+    let drawingWall = false;
+    let wallPoints = [];
+
+    // Обработчики радиокнопок
+    document.querySelectorAll('input[name="mode"]').forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            currentMode = e.target.value;
+            if(drawingWall) finishWall();
+            clearSelection();
+        });
+    });
+
+    // Обработчик масштаба
+    document.getElementById('scaleInput').addEventListener('change', (e) => {
+        scale = parseFloat(e.target.value);
+        redraw();
+    });
+
+    // Загрузка картинки
+    document.getElementById('imageLoader').addEventListener('change', function(e) {
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            img.onload = function() {
+                canvas.width = img.width;
+                canvas.height = img.height;
+                // Если мы еще не импортировали карту, ставим 0,0 в нижний левый угол
+                if (Object.keys(nodes).length === 0 && walls.length === 0) {
+                    originPx = { x: 50, y: img.height - 50 };
+                }
+                redraw();
+            }
+            img.src = event.target.result;
+        }
+        if(e.target.files[0]) reader.readAsDataURL(e.target.files[0]);
+    });
+
+    // === ИМПОРТ JSON ФАЙЛА ===
+    document.getElementById('jsonLoader').addEventListener('change', function(e) {
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            try {
+                const data = JSON.parse(event.target.result);
+
+                // Восстанавливаем служебные данные
+                if (data.originPx) originPx = data.originPx;
+                if (data.scale) {
+                    scale = data.scale;
+                    document.getElementById('scaleInput').value = scale;
+                }
+
+                // Восстанавливаем объекты
+                nodes = data.nodes || {};
+                walls = data.walls || [];
+
+                // Чиним счетчик ID для новых точек
+                let maxId = 0;
+                for (let id in nodes) {
+                    if (id.startsWith('wp_')) {
+                        let num = parseInt(id.replace('wp_', ''));
+                        if (num > maxId) maxId = num;
+                    }
+                }
+                nodeIdCounter = maxId + 1;
+
+                redraw();
+                alert("✅ Карта успешно загружена! Загрузите картинку подложки, если она еще не загружена.");
+            } catch (err) {
+                alert("❌ Ошибка чтения файла. Убедитесь, что это правильный .json");
+            }
+        };
+        if(e.target.files[0]) reader.readAsText(e.target.files[0]);
+        // Сбрасываем input, чтобы можно было загрузить тот же файл еще раз при ошибке
+        e.target.value = '';
+    });
+
+    // === ЭКСПОРТ В ФАЙЛ ===
+    function downloadJSON() {
+        // Собираем всё в один объект
+        const data = { originPx, scale, nodes, walls };
+
+        // Создаем виртуальный файл
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+
+        // Эмулируем клик по ссылке для скачивания
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'building_map.json';
+        document.body.appendChild(a);
+        a.click();
+
+        // Убираем за собой
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    // Удаление и горячие клавиши
+    document.getElementById('btnDelete').addEventListener('click', deleteSelected);
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
+        if (e.key === 'Escape' && drawingWall) finishWall();
+    });
+
+    canvas.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        if (drawingWall) finishWall();
+    });
+
+    // Логика мыши
+    canvas.addEventListener('mousedown', function(e) {
+        if (e.button === 2) return;
+        const pos = getMousePos(e);
+
+        if (currentMode === 'ORIGIN') {
+            originPx = { x: pos.x, y: pos.y };
+            redraw();
+        }
+        else if (currentMode === 'ADD_NODE') {
+            const name = prompt("Название (например, '208'). Пусто = коридорная точка:");
+            if (name !== null) {
+                const id = name.trim() !== "" ? "room_" + name.replace(/\s/g, '_') : "wp_" + nodeIdCounter++;
+                const meterCoords = pxToMeters(pos.x, pos.y);
+                nodes[id] = { id, name: name.trim() || "Точка пути", x: meterCoords.x, y: meterCoords.y, type: name.trim() ? "room" : "waypoint" };
+                redraw();
+            }
+        }
+        else if (currentMode === 'ADD_WALL') {
+            let currentPos = pos;
+            if (drawingWall && e.shiftKey && wallPoints.length > 0) {
+                const lastPt = wallPoints[wallPoints.length - 1];
+                const dx = Math.abs(pos.x - lastPt.x);
+                const dy = Math.abs(pos.y - lastPt.y);
+                if (dx > dy) currentPos.y = lastPt.y;
+                else currentPos.x = lastPt.x;
+            }
+
+            if (!drawingWall) {
+                drawingWall = true;
+                wallPoints = [currentPos];
+            } else {
+                const lastPt = wallPoints[wallPoints.length - 1];
+                if (Math.hypot(currentPos.x - lastPt.x, currentPos.y - lastPt.y) > 5) {
+                    const startM = pxToMeters(lastPt.x, lastPt.y);
+                    const endM = pxToMeters(currentPos.x, currentPos.y);
+                    walls.push({ x1: startM.x, y1: startM.y, x2: endM.x, y2: endM.y });
+                    wallPoints.push(currentPos);
+                }
+            }
+            redraw();
+        }
+        else if (currentMode === 'SELECT') {
+            const hit = detectHit(pos.x, pos.y);
+            if (hit) {
+                selectedItem = hit;
+                updateEditPanel();
+                if (hit.type === 'node') dragging = true;
+            } else {
+                clearSelection();
+            }
+        }
+    });
+
+    canvas.addEventListener('mousemove', function(e) {
+        const pos = getMousePos(e);
+
+        if (currentMode === 'SELECT' && dragging && selectedItem?.type === 'node') {
+            const meterCoords = pxToMeters(pos.x, pos.y);
+            nodes[selectedItem.id].x = meterCoords.x;
+            nodes[selectedItem.id].y = meterCoords.y;
+            redraw();
+        }
+        else if (currentMode === 'ADD_WALL' && drawingWall) {
+            redraw();
+            const lastPt = wallPoints[wallPoints.length - 1];
+            let drawPos = pos;
+
+            if (e.shiftKey) {
+                const dx = Math.abs(pos.x - lastPt.x);
+                const dy = Math.abs(pos.y - lastPt.y);
+                if (dx > dy) drawPos.y = lastPt.y;
+                else drawPos.x = lastPt.x;
+            }
+
+            ctx.beginPath();
+            ctx.moveTo(lastPt.x, lastPt.y);
+            ctx.lineTo(drawPos.x, drawPos.y);
+            ctx.strokeStyle = '#FF9800';
+            ctx.setLineDash([5, 5]);
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+    });
+
+    canvas.addEventListener('mouseup', function(e) {
+        if (currentMode === 'SELECT') dragging = false;
+    });
+
+    function finishWall() {
+        drawingWall = false;
+        wallPoints = [];
+        redraw();
+    }
+
+    function getMousePos(evt) {
+        const rect = canvas.getBoundingClientRect();
+        return {
+            x: (evt.clientX - rect.left) * (canvas.width / rect.width),
+            y: (evt.clientY - rect.top) * (canvas.height / rect.height)
+        };
+    }
+
+    function pxToMeters(px, py) {
+        return { x: +( (px - originPx.x) * scale ).toFixed(2), y: +( (originPx.y - py) * scale ).toFixed(2) };
+    }
+    function metersToPx(mx, my) {
+        return { x: originPx.x + (mx / scale), y: originPx.y - (my / scale) };
+    }
+
+    function detectHit(px, py) {
+        for (let id in nodes) {
+            const nPos = metersToPx(nodes[id].x, nodes[id].y);
+            if (Math.hypot(px - nPos.x, py - nPos.y) < 10) return { type: 'node', id: id };
+        }
+        for (let i = 0; i < walls.length; i++) {
+            const w = walls[i];
+            const p1 = metersToPx(w.x1, w.y1);
+            const p2 = metersToPx(w.x2, w.y2);
+            const d = Math.abs((p2.x - p1.x)*(p1.y - py) - (p1.x - px)*(p2.y - p1.y)) / Math.hypot(p2.x - p1.x, p2.y - p1.y);
+            if (d < 5) {
+                const minX = Math.min(p1.x, p2.x) - 5, maxX = Math.max(p1.x, p2.x) + 5;
+                const minY = Math.min(p1.y, p2.y) - 5, maxY = Math.max(p1.y, p2.y) + 5;
+                if (px >= minX && px <= maxX && py >= minY && py <= maxY) return { type: 'wall', index: i };
+            }
+        }
+        return null;
+    }
+
+    function clearSelection() {
+        selectedItem = null;
+        document.getElementById('editPanel').style.display = 'none';
+        redraw();
+    }
+
+    function updateEditPanel() {
+        if (!selectedItem) return;
+        document.getElementById('editPanel').style.display = 'block';
+        if (selectedItem.type === 'node') {
+            document.getElementById('selectedInfo').innerText = `Точка: ${nodes[selectedItem.id].name} \nX: ${nodes[selectedItem.id].x}, Y: ${nodes[selectedItem.id].y}`;
+        } else {
+            document.getElementById('selectedInfo').innerText = `Стена #${selectedItem.index}`;
+        }
+        redraw();
+    }
+
+    function deleteSelected() {
+        if (!selectedItem) return;
+        if (selectedItem.type === 'node') delete nodes[selectedItem.id];
+        else if (selectedItem.type === 'wall') walls.splice(selectedItem.index, 1);
+        clearSelection();
+    }
+
+    function redraw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (img.src) ctx.drawImage(img, 0, 0);
+
+        ctx.beginPath();
+        ctx.moveTo(originPx.x - 20, originPx.y); ctx.lineTo(originPx.x + 20, originPx.y);
+        ctx.moveTo(originPx.x, originPx.y - 20); ctx.lineTo(originPx.x, originPx.y + 20);
+        ctx.strokeStyle = 'rgba(255, 0, 0, 0.7)'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.fillStyle = 'red'; ctx.font = 'bold 14px Arial'; ctx.fillText('(0,0)', originPx.x + 5, originPx.y - 5);
+
+        walls.forEach((w, index) => {
+            const p1 = metersToPx(w.x1, w.y1);
+            const p2 = metersToPx(w.x2, w.y2);
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
+            ctx.strokeStyle = (selectedItem?.type === 'wall' && selectedItem.index === index) ? '#00BCD4' : '#333';
+            ctx.lineWidth = 4; ctx.stroke();
+        });
+
+        for (let id in nodes) {
+            const node = nodes[id];
+            const pxPos = metersToPx(node.x, node.y);
+            ctx.beginPath();
+            ctx.arc(pxPos.x, pxPos.y, 7, 0, 2 * Math.PI);
+            ctx.fillStyle = (selectedItem?.type === 'node' && selectedItem.id === id) ? '#FFEB3B' : (node.type === 'room' ? '#E91E63' : '#2196F3');
+            ctx.fill();
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+            if (node.type === 'room') {
+                ctx.fillStyle = '#000'; ctx.font = 'bold 14px Arial';
+                ctx.shadowColor="white"; ctx.shadowBlur=4; ctx.shadowLineWidth=3;
+                ctx.strokeText(node.name, pxPos.x + 10, pxPos.y - 10);
+                ctx.shadowBlur=0;
+                ctx.fillText(node.name, pxPos.x + 10, pxPos.y - 10);
+            }
+        }
+    }
+</script>
+</body>
+</html>
