@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import * as Speech from 'expo-speech';
 import { useBuildingMap } from './useBuildingMap';
-import { useCompass } from './useCompass';
+import { useOrientation } from './useOrientation';
 import { useCustomPedometer } from './useCustomPedometer';
 import { parseVoiceCommand, matchNodeOnMap } from '@/utils/intentParser';
 import { findShortestPath, RouteStep } from '@/utils/pathfinder';
@@ -41,9 +41,11 @@ const getAngleDiff = (angle1: number, angle2: number) => {
     return diff > 180 ? 360 - diff : diff;
 };
 
+
+
 export const useNavigator = () => {
     const { mapData, mapWalls, currentNodeId, checkInAtLocation } = useBuildingMap();
-    const { heading: rawCompassHeading, pitch, roll } = useCompass();
+    const { heading: rawCompassHeading, pitch, roll } = useOrientation();
 
     const [isSimMode, setIsSimMode] = useState(true);
     const [simHeading, setSimHeading] = useState(0);
@@ -60,13 +62,61 @@ export const useNavigator = () => {
     const [arrivalAnnounced, setArrivalAnnounced] = useState(false);
     const [viewFloor, setViewFloor] = useState(1);
 
+    const currentFloor = viewFloor;
+    const currentLeg = activeRoute ? activeRoute[currentStepIndex] : null;
+
+    let distanceToTarget = 0;
+    if (currentLeg && mapData && mapData[currentLeg.toNodeId]) {
+        distanceToTarget = Math.hypot(currentPos.x - mapData[currentLeg.toNodeId].x, currentPos.y - mapData[currentLeg.toNodeId].y);
+    }
+    const legStartPosRef = useRef<{x: number, y: number} | null>(null);
+
     const currentHeading = useMemo(() => {
         let heading = rawCompassHeading - BUILDING_NORTH_OFFSET;
         if (heading < 0) heading += 360;
-        return heading;
+
+        const SNAP_ANGLE = 90;
+        const TOLERANCE = 15;
+
+        const nearestAxis = Math.round(heading / SNAP_ANGLE) * SNAP_ANGLE;
+
+        let diff = Math.abs(heading - nearestAxis);
+        if (diff > 180) diff = 360 - diff;
+
+        if (diff <= TOLERANCE) {
+            heading = nearestAxis;
+        }
+
+        return heading % 360;
     }, [rawCompassHeading]);
 
     const effectiveHeading = isSimMode ? simHeading : currentHeading;
+
+    const linesIntersect = (
+        x1: number, y1: number, x2: number, y2: number,
+        x3: number, y3: number, x4: number, y4: number
+    ) => {
+        const denominator = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1);
+        if (denominator === 0) return false;
+
+        const ua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / denominator;
+        const ub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / denominator;
+
+        return (ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1);
+    };
+
+    const projectPointOnLineSegment = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
+        const l2 = (bx - ax) * (bx - ax) + (by - ay) * (by - ay);
+        if (l2 === 0) return { x: ax, y: ay };
+
+        let t = ((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / l2;
+        t = Math.max(0, Math.min(1, t));
+
+        return {
+            x: ax + t * (bx - ax),
+            y: ay + t * (by - ay)
+        };
+    };
 
     const speak = useCallback((text: string) => {
         setLastResponse(text);
@@ -90,20 +140,58 @@ export const useNavigator = () => {
         }
     }, [mapData, currentNodeId, checkInAtLocation]);
 
+    const lastTiltWarningRef = useRef<number>(0);
+
+    useEffect(() => {
+        if (Math.abs(pitch) > 60 || Math.abs(roll) > 60) {
+            const now = Date.now();
+
+            if (now - lastTiltWarningRef.current > 5000) {
+                speak("Пожалуйста, держите телефон ровнее");
+                lastTiltWarningRef.current = now;
+            }
+        }
+    }, [pitch, roll, speak]);
+
+    const lastWallWarningRef = useRef<number>(0);
+
     const handleStep = useCallback(() => {
         const activeHeading = isSimMode ? simHeading : currentHeading;
-        setCurrentPos(prev => {
-            const dx = STEP_LENGTH * Math.sin(activeHeading * (Math.PI / 180));
-            const dy = STEP_LENGTH * Math.cos(activeHeading * (Math.PI / 180));
-            return { x: prev.x + dx, y: prev.y + dy };
-        });
-    }, [isSimMode, simHeading, currentHeading]);
+
+        const dx = STEP_LENGTH * Math.sin(activeHeading * (Math.PI / 180));
+        const dy = STEP_LENGTH * Math.cos(activeHeading * (Math.PI / 180));
+
+        const nextX = currentPos.x + dx;
+        const nextY = currentPos.y + dy;
+
+        let hitWall = false;
+
+        if (mapWalls && mapWalls[currentFloor]) {
+            for (const wall of mapWalls[currentFloor]) {
+                if (linesIntersect(currentPos.x, currentPos.y, nextX, nextY, wall.x1, wall.y1, wall.x2, wall.y2)) {
+                    hitWall = true;
+                    break;
+                }
+            }
+        }
+
+        if (hitWall) {
+            const now = Date.now();
+            if (now - lastWallWarningRef.current > 4000) {
+                speak("Препятствие. Впереди стена.");
+                lastWallWarningRef.current = now;
+            }
+            return;
+        }
+
+        setCurrentPos({ x: nextX, y: nextY });
+
+    }, [isSimMode, simHeading, currentHeading, currentPos, mapWalls, currentFloor, speak]);
 
     useCustomPedometer(activeRoute !== null && !isSimMode, handleStep);
 
     useEffect(() => {
         if (!activeRoute || activeRoute.length === 0 || !mapData) return;
-        const currentLeg = activeRoute[currentStepIndex];
         if (!currentLeg) return;
 
         const targetNode = mapData[currentLeg.toNodeId];
@@ -123,6 +211,7 @@ export const useNavigator = () => {
                     : `${turnText}. Ваша цель, ${nextLeg.toNodeName}, через ${distanceText} метров.`;
 
                 speak(prompt);
+                legStartPosRef.current = { x: targetNode.x, y: targetNode.y };
                 setCurrentStepIndex(prev => prev + 1);
             } else {
                 if (!arrivalAnnounced) {
@@ -138,28 +227,45 @@ export const useNavigator = () => {
                 }
             }
         }
-    }, [currentPos, activeRoute, currentStepIndex, mapData, arrivalAnnounced, checkInAtLocation, speak]);
+    }, [currentPos, activeRoute, currentStepIndex, mapData, arrivalAnnounced, checkInAtLocation, speak, currentLeg]);
+
+    const lastWrongDirWarningRef = useRef<number>(0);
 
     useEffect(() => {
-        if (!activeRoute || activeRoute.length === 0 || !mapData) return;
-        const currentLeg = activeRoute[currentStepIndex];
-        if (!currentLeg) return;
+        if (!activeRoute || activeRoute.length === 0 || !mapData || !currentLeg) return;
 
-        if (currentLeg.distance > 5 && currentLeg.bearing !== undefined) {
-            const angleDiff = getAngleDiff(effectiveHeading, currentLeg.bearing);
-            if (angleDiff > 45 && !isWrongDirection) {
-                setIsWrongDirection(true);
-                speak(`Сбились с курса. Возьмите ${getRelativeDirectionText(effectiveHeading, currentLeg.bearing)}.`);
-            } else if (angleDiff <= 45 && isWrongDirection) {
-                setIsWrongDirection(false);
+        if (currentLeg.distance > 2 && currentLeg.bearing !== undefined) {
+
+            let realHeading = rawCompassHeading - BUILDING_NORTH_OFFSET;
+            if (realHeading < 0) realHeading += 360;
+
+            const angleDiff = getAngleDiff(realHeading, currentLeg.bearing);
+
+            if (angleDiff > 45) {
+                const now = Date.now();
+
+                if (!isWrongDirection) {
+                    setIsWrongDirection(true);
+                }
+
+                if (now - lastWrongDirWarningRef.current > 6000) {
+                    speak(`Сбились с направления. Возьмите ${getRelativeDirectionText(realHeading, currentLeg.bearing)}`);
+                    lastWrongDirWarningRef.current = now;
+                }
+            } else {
+                if (isWrongDirection) {
+                    setIsWrongDirection(false);
+                    speak("Курс верный. Продолжайте движение.");
+                }
             }
         }
-    }, [effectiveHeading, activeRoute, currentStepIndex, mapData, isWrongDirection, speak]);
+    }, [rawCompassHeading, activeRoute, currentLeg, mapData, isWrongDirection, speak]);
 
     const startNavigation = useCallback((startId: string, destId: string, wantsElevator: boolean, isFallback: boolean = false) => {
         if (!mapData) return;
         const startNode = mapData[startId];
         const destNode = mapData[destId];
+
 
         setUseElevator(wantsElevator);
         setFinalDestId(destId);
@@ -211,12 +317,11 @@ export const useNavigator = () => {
 
 
             if (route.length > 0) {
+                legStartPosRef.current = { x: currentPos.x, y: currentPos.y };
                 setActiveRoute(route);
                 setCurrentStepIndex(0);
                 setIsWrongDirection(false);
                 setArrivalAnnounced(false);
-
-                if(isSimMode) setSimHeading(route[0].bearing || 0);
 
                 const firstLeg = route[0];
                 const isGenericNode = firstLeg.toNodeName.toLowerCase().includes('точка') || firstLeg.toNodeName.toLowerCase().includes('waypoint');
@@ -249,8 +354,6 @@ export const useNavigator = () => {
             }
         }
     }, [mapData, currentPos, isSimMode, speak, checkInAtLocation]);
-
-    const currentFloor = viewFloor;
 
     const portalNearby = useMemo(() => {
         if (!mapData) return null;
@@ -288,6 +391,63 @@ export const useNavigator = () => {
         }
         return floors.sort();
     }, [portalNearby, mapData, currentFloor]);
+
+    const lastRerouteTimeRef = useRef<number>(0);
+
+    useEffect(() => {
+        if (!activeRoute || !currentLeg || !legStartPosRef.current || !mapData || !finalDestId) return;
+
+        const startP = legStartPosRef.current;
+        const targetP = mapData[currentLeg.toNodeId];
+
+        if (!targetP) return;
+
+        const projected = projectPointOnLineSegment(currentPos.x, currentPos.y, startP.x, startP.y, targetP.x, targetP.y);
+
+        const driftDistance = Math.hypot(currentPos.x - projected.x, currentPos.y - projected.y);
+
+        if (driftDistance > 3.5) {
+            const now = Date.now();
+
+            if (now - lastRerouteTimeRef.current > 5000) {
+                lastRerouteTimeRef.current = now;
+
+                let closestNodeId = null;
+                let minDist = Infinity;
+
+                for (const key in mapData) {
+                    const node = mapData[key];
+                    if (node.floor === currentFloor) {
+
+                        let isBlocked = false;
+                        if (mapWalls && mapWalls[currentFloor]) {
+                            for (const wall of mapWalls[currentFloor]) {
+                                if (linesIntersect(currentPos.x, currentPos.y, node.x, node.y, wall.x1, wall.y1, wall.x2, wall.y2)) {
+                                    isBlocked = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (!isBlocked) {
+                            const dist = Math.hypot(currentPos.x - node.x, currentPos.y - node.y);
+                            if (dist < minDist) {
+                                minDist = dist;
+                                closestNodeId = key;
+                            }
+                        }
+                    }
+                }
+
+                if (closestNodeId) {
+                    speak('Вы ушли с маршрута. Перестраиваю путь.');
+                    setTimeout(() => {
+                        startNavigation(closestNodeId, finalDestId, useElevator, true);
+                    }, 1500);
+                }
+            }
+        }
+    }, [currentPos, activeRoute, currentLeg, mapData, finalDestId, currentFloor, mapWalls, useElevator, startNavigation, speak]);
 
     const handleFloorTransition = useCallback(async (targetFloor: number) => {
         if (!portalNearby || !mapData) return;
@@ -343,7 +503,7 @@ export const useNavigator = () => {
 
         if (intent.type === 'CONFIRM_FLOOR' && intent.payload) {
             const floorStr = intent.payload.toLowerCase();
-            let targetFloor = parseInt(floorStr);
+            let targetFloor = parseInt(floorStr, 10);
 
             if (isNaN(targetFloor)) {
                 if (floorStr.includes('перв')) targetFloor = 1;
@@ -422,8 +582,6 @@ export const useNavigator = () => {
         }
     }, [mapData, speak, availableFloors, portalNearby, handleFloorTransition, viewFloor, currentPos.x, currentPos.y, checkInAtLocation, currentNodeId, startNavigation]);
 
-    const currentLeg = activeRoute ? activeRoute[currentStepIndex] : null;
-    let distanceToTarget = 0;
     if (currentLeg && mapData && mapData[currentLeg.toNodeId]) {
         distanceToTarget = Math.hypot(currentPos.x - mapData[currentLeg.toNodeId].x, currentPos.y - mapData[currentLeg.toNodeId].y);
     }

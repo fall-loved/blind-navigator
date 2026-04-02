@@ -24,6 +24,16 @@ const calculateEdgeData = (nodeA: NavNode, nodeB: NavNode): { distance: number; 
     };
 };
 
+const getTurnAngle = (ax: number, ay: number, bx: number, by: number, cx: number, cy: number) => {
+    const angle1 = Math.atan2(ay - by, ax - bx);
+    const angle2 = Math.atan2(cy - by, cx - bx);
+
+    let angle = Math.abs((angle1 - angle2) * (180 / Math.PI));
+    if (angle > 180) angle = 360 - angle;
+
+    return angle;
+};
+
 export const findShortestPath = (graph: Record<string, NavNode>, startId: string, endId: string, preferElevator: boolean = false): RouteStep[] | null => {
     const distances: Record<string, number> = {};
     const previous: Record<string, string | null> = {};
@@ -68,7 +78,23 @@ export const findShortestPath = (graph: Record<string, NavNode>, startId: string
                 roomPenalty += 50;
             }
 
-            const alt = distances[currNode] + edgeData.distance + floorPenalty + roomPenalty;
+            let anglePenalty = 0;
+            if (neighborId === endId && previous[currNode] !== null) {
+                const prevNodeId = previous[currNode] as string;
+                const nodeA = graph[prevNodeId];
+                const nodeB = graph[currNode];
+                const nodeC = graph[neighborId];
+
+                if (nodeA && nodeB && nodeC && nodeA.floor === nodeB.floor && nodeB.floor === nodeC.floor) {
+                    const turnAngle = getTurnAngle(nodeA.x, nodeA.y, nodeB.x, nodeB.y, nodeC.x, nodeC.y);
+                    const deviationFrom90 = Math.abs(90 - turnAngle);
+
+                    anglePenalty = deviationFrom90 * 1.5;
+                }
+            }
+
+            const alt = distances[currNode] + edgeData.distance + floorPenalty + roomPenalty + anglePenalty;
+
             if (alt < distances[neighborId]) {
                 distances[neighborId] = alt;
                 previous[neighborId] = currNode;
