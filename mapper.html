@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Картограф 3.0 - Файловая система</title>
+    <title>Картограф</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; margin: 0; padding: 0; background: #eef2f5; height: 100vh; overflow: hidden; }
         #toolbar { width: 320px; background: #fff; padding: 20px; box-shadow: 2px 0 5px rgba(0,0,0,0.1); overflow-y: auto; z-index: 10; }
@@ -26,7 +26,7 @@
 <body>
 
 <div id="toolbar">
-    <h2>Картограф 3.0</h2>
+    <h2>Картограф</h2>
 
     <div class="panel">
         <h3>1. Загрузка подложки</h3>
@@ -81,7 +81,6 @@
     let drawingWall = false;
     let wallPoints = [];
 
-    // Обработчики радиокнопок
     document.querySelectorAll('input[name="mode"]').forEach(radio => {
         radio.addEventListener('change', (e) => {
             currentMode = e.target.value;
@@ -90,20 +89,17 @@
         });
     });
 
-    // Обработчик масштаба
     document.getElementById('scaleInput').addEventListener('change', (e) => {
         scale = parseFloat(e.target.value);
         redraw();
     });
 
-    // Загрузка картинки
     document.getElementById('imageLoader').addEventListener('change', function(e) {
         const reader = new FileReader();
         reader.onload = function(event) {
             img.onload = function() {
                 canvas.width = img.width;
                 canvas.height = img.height;
-                // Если мы еще не импортировали карту, ставим 0,0 в нижний левый угол
                 if (Object.keys(nodes).length === 0 && walls.length === 0) {
                     originPx = { x: 50, y: img.height - 50 };
                 }
@@ -114,25 +110,18 @@
         if(e.target.files[0]) reader.readAsDataURL(e.target.files[0]);
     });
 
-    // === ИМПОРТ JSON ФАЙЛА ===
     document.getElementById('jsonLoader').addEventListener('change', function(e) {
         const reader = new FileReader();
         reader.onload = function(event) {
             try {
                 const data = JSON.parse(event.target.result);
-
-                // Восстанавливаем служебные данные
                 if (data.originPx) originPx = data.originPx;
                 if (data.scale) {
                     scale = data.scale;
                     document.getElementById('scaleInput').value = scale;
                 }
-
-                // Восстанавливаем объекты
                 nodes = data.nodes || {};
                 walls = data.walls || [];
-
-                // Чиним счетчик ID для новых точек
                 let maxId = 0;
                 for (let id in nodes) {
                     if (id.startsWith('wp_')) {
@@ -143,38 +132,30 @@
                 nodeIdCounter = maxId + 1;
 
                 redraw();
-                alert("✅ Карта успешно загружена! Загрузите картинку подложки, если она еще не загружена.");
+                alert("Карта успешно загружена! Загрузите картинку подложки, если она еще не загружена.");
             } catch (err) {
-                alert("❌ Ошибка чтения файла. Убедитесь, что это правильный .json");
+                alert("Ошибка чтения файла. Убедитесь, что это правильный .json");
             }
         };
         if(e.target.files[0]) reader.readAsText(e.target.files[0]);
-        // Сбрасываем input, чтобы можно было загрузить тот же файл еще раз при ошибке
         e.target.value = '';
     });
 
-    // === ЭКСПОРТ В ФАЙЛ ===
     function downloadJSON() {
-        // Собираем всё в один объект
         const data = { originPx, scale, nodes, walls };
-
-        // Создаем виртуальный файл
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
 
-        // Эмулируем клик по ссылке для скачивания
         const a = document.createElement('a');
         a.href = url;
         a.download = 'building_map.json';
         document.body.appendChild(a);
         a.click();
 
-        // Убираем за собой
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
     }
 
-    // Удаление и горячие клавиши
     document.getElementById('btnDelete').addEventListener('click', deleteSelected);
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
@@ -186,7 +167,6 @@
         if (drawingWall) finishWall();
     });
 
-    // Логика мыши
     canvas.addEventListener('mousedown', function(e) {
         if (e.button === 2) return;
         const pos = getMousePos(e);
